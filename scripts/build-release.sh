@@ -10,6 +10,8 @@ version_value=${AIR75_VERSION:-0.14.0}
 build_value=${AIR75_BUILD_NUMBER:-54}
 release_kind=${AIR75_RELEASE_KIND:-development}
 identity_value=${AIR75_SIGNING_IDENTITY:-N Agent Bridge Local Signing}
+bundle_id_value=${AIR75_BUNDLE_ID:-com.nagentbridge.mac}
+display_name_value=${AIR75_DISPLAY_NAME:-N Agent Bridge}
 arch_values=${AIR75_RELEASE_ARCHS:-}
 swift_sandbox_flags=()
 if [[ ${AIR75_DISABLE_SWIFTPM_SANDBOX:-0} == 1 ]]; then
@@ -102,6 +104,9 @@ fi
 cp "$distribution_dir/AppIcon.icns" "$app_dir/Contents/Resources/AppIcon.icns"
 plutil -replace CFBundleShortVersionString -string "$version_value" "$app_dir/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$build_value" "$app_dir/Contents/Info.plist"
+plutil -replace CFBundleIdentifier -string "$bundle_id_value" "$app_dir/Contents/Info.plist"
+plutil -replace CFBundleDisplayName -string "$display_name_value" "$app_dir/Contents/Info.plist"
+plutil -replace CFBundleName -string "$display_name_value" "$app_dir/Contents/Info.plist"
 
 for resource_bundle in "${release_bin_dirs[1]}"/*.bundle; do
   [[ -e "$resource_bundle" ]] || continue
