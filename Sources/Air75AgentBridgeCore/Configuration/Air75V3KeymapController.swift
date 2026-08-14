@@ -10,6 +10,7 @@ public enum Air75KeymapError: LocalizedError {
     case invalidChecksum
     case invalidLength
     case incompatibleLayout(index: Int, value: UInt16)
+    case unsupportedKnobCustomization(index: Int, value: UInt16)
     case verificationFailed
     case restoreFailed
     case originalBackupNotFound
@@ -34,6 +35,8 @@ public enum Air75KeymapError: LocalizedError {
             return "Air75 V3 键位表长度不符合 Air75 V3 ANSI 布局"
         case .incompatibleLayout(let index, let value):
             return "键盘第 \(index) 个矩阵位置不是已验证布局（0x\(String(value, radix: 16))），已停止写入"
+        case .unsupportedKnobCustomization:
+            return "检测到第 1 层旋钮按下被设为播放/暂停；请先在 NuPhyIO 中把旋钮按下恢复为静音（Mute），退出 NuPhyIO 后再配置"
         case .verificationFailed:
             return "键位写入后的逐字节回读校验失败，已尝试恢复原配置"
         case .restoreFailed:
@@ -132,6 +135,9 @@ public final class Air75V3KeymapController: @unchecked Sendable {
                 let isEighthLayerEmptyKnobPress = layer == 7
                     && item.index == 60
                     && current == 0x0000
+                if layer == 0 && item.index == 60 && current == 0x00AE {
+                    throw Air75KeymapError.unsupportedKnobCustomization(index: index, value: current)
+                }
                 guard item.allowed.contains(current) || isEighthLayerEmptyKnobPress else {
                     throw Air75KeymapError.incompatibleLayout(index: index, value: current)
                 }
