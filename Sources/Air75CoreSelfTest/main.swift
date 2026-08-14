@@ -690,6 +690,21 @@ do {
     check(code(7 * 98 + 60) == 0x0048,
           "eighth-layer empty knob press normalizes to dedicated event")
 
+    var firstLayerPlayPause = bytes
+    firstLayerPlayPause[60 * 2] = 0x00
+    firstLayerPlayPause[60 * 2 + 1] = 0xAE
+    check(!Air75V3KeymapController.isPlausibleKeymap(firstLayerPlayPause),
+          "first-layer Play/Pause customization remains blocked")
+    do {
+        _ = try Air75V3KeymapController().makeBridgeProfile(from: firstLayerPlayPause)
+        check(false, "first-layer Play/Pause reports actionable error")
+    } catch Air75KeymapError.unsupportedKnobCustomization(let index, let value) {
+        check(index == 60 && value == 0x00AE,
+              "first-layer Play/Pause reports actionable error")
+    } catch {
+        check(false, "first-layer Play/Pause reports actionable error")
+    }
+
     var wrongLayerEmpty = bytes
     wrongLayerEmpty[6 * 98 * 2 + 60 * 2] = 0x00
     wrongLayerEmpty[6 * 98 * 2 + 60 * 2 + 1] = 0x00
