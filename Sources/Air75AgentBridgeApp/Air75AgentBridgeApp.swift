@@ -86,7 +86,9 @@ private final class WindowProbeView: NSView {
             guard let window,
                   let visibleFrame = (window.screen ?? NSScreen.main)?.visibleFrame else { return }
 
-            window.title = "N Agent Bridge"
+            window.title = Bundle.main.bundleIdentifier == "com.nagentbridge.mac.debug"
+                ? "N Agent Bridge Debug"
+                : "N Agent Bridge"
             window.titleVisibility = .visible
             window.titlebarAppearsTransparent = false
 
