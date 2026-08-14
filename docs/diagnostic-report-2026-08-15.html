@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>N Agent Bridge 配置故障诊断报告 · 2026-08-15</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#f5f7fb; --panel:#fff; --text:#172033; --muted:#647087; --line:#dce2ec; --blue:#1769e0; --green:#16835d; --orange:#b45b05; --red:#c23636; --code:#eef2f8; }
+    @media (prefers-color-scheme:dark) { :root { --bg:#14171d; --panel:#1d2129; --text:#edf1f7; --muted:#aeb7c7; --line:#343b48; --blue:#62a4ff; --green:#55d6a4; --orange:#ffad5c; --red:#ff7474; --code:#272d38; } }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:15px/1.62 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { width:min(1040px,calc(100% - 32px)); margin:32px auto 64px; }
+    header { margin-bottom:24px; }
+    h1 { margin:0 0 6px; font-size:30px; line-height:1.2; }
+    h2 { margin:0 0 14px; font-size:20px; }
+    h3 { margin:0 0 8px; font-size:16px; }
+    p { margin:7px 0; }
+    .muted { color:var(--muted); }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px; margin-bottom:16px; }
+    .status { display:inline-block; padding:2px 9px; border-radius:99px; font-weight:650; font-size:13px; }
+    .ok { color:var(--green); background:color-mix(in srgb,var(--green) 13%,transparent); }
+    .fail { color:var(--red); background:color-mix(in srgb,var(--red) 13%,transparent); }
+    .warn { color:var(--orange); background:color-mix(in srgb,var(--orange) 13%,transparent); }
+    .unknown { color:var(--blue); background:color-mix(in srgb,var(--blue) 13%,transparent); }
+    table { width:100%; border-collapse:collapse; }
+    th,td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+    th { color:var(--muted); font-size:13px; }
+    code,pre { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--code); }
+    code { padding:2px 5px; border-radius:5px; }
+    pre { white-space:pre-wrap; overflow-wrap:anywhere; padding:14px; border-radius:10px; margin:10px 0 0; font-size:13px; }
+    ol,ul { margin:8px 0; padding-left:22px; }
+    .flow { display:grid; grid-template-columns:1fr auto 1fr auto 1fr; align-items:center; gap:10px; }
+    .step { border:1px solid var(--line); border-radius:10px; padding:12px; min-height:82px; }
+    .arrow { color:var(--muted); font-size:20px; }
+    .accent { border-left:4px solid var(--orange); }
+    @media (max-width:720px) { .grid { grid-template-columns:1fr; } .flow { grid-template-columns:1fr; } .arrow { transform:rotate(90deg); text-align:center; } main { width:min(100% - 20px,1040px); margin-top:18px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>N Agent Bridge 配置故障诊断报告</h1>
+    <p class="muted">日期：2026-08-15 CST · 产品：0.15.0 (57) · 设备：NuPhy Air75 V3 ANSI · USB：19F5:1028</p>
+  </header>
+
+  <section class="card accent">
+    <h2>结论摘要</h2>
+    <p><strong>“点击后没有反应”的产品根因已经通过独立 Bundle ID 调试版定位。</strong></p>
+    <ul>
+      <li><strong>配置流程实际已进入：</strong>B2 成功读取完整 <code>1568 bytes</code>，随后在写入前的布局白名单校验中停止。</li>
+      <li><strong>精确根因：</strong>第 1 层旋钮按下位置 p60 为 <code>0x00AE</code>（Play/Pause），而 0.15.0 只接受该位置的已验证出厂/Bridge 值。程序把这个正常的 NuPhyIO 自定义误归类为“加密会话数据”，UI 因而没有给出可执行原因。</li>
+      <li><strong>安全处置：</strong>本次没有发送 B3，没有改变键位表，也没有保存不合格原始备份。源码现会明确要求先在 NuPhyIO 把第 1 层旋钮按下恢复为 Mute，再退出 NuPhyIO 后配置；白名单没有放宽。</li>
+      <li><strong>状态灯写入失败：</strong>已经由真机 Probe 稳定复现。D8 返回 ACK，但写入 F1 新颜色 <code>#123456</code> 后，D2 实际回读为 <code>#000000</code>。控制器按安全规则尝试恢复并返回失败。</li>
+    </ul>
+    <p>D8 问题会造成 Agent 状态灯失败，但按当前代码顺序，它<strong>不应阻止</strong>首次 B2/B3 键位配置：键位写入和完整回读发生在状态灯同步之前。</p>
+  </section>
+
+  <div class="grid">
+    <section class="card">
+      <h2>配置入口调查</h2>
+      <p><span class="status ok">根因已定位</span></p>
+      <table>
+        <tr><th>观察</th><th>结果</th></tr>
+        <tr><td>UI 显示</td><td>USB-C 已连接、权限已允许、需要配置当前键盘</td></tr>
+        <tr><td>独立调试实例</td><td><code>com.nagentbridge.mac.debug</code>，排除了安装版/源码版混淆</td></tr>
+        <tr><td>B2 读取</td><td><span class="status ok">1568 bytes 完整成功</span></td></tr>
+        <tr><td>失败位置</td><td>index 60 / layer 1 p60 / <code>0x00AE</code> Play/Pause</td></tr>
+        <tr><td>写入状态</td><td><span class="status ok">B3 未发送，键盘未改动</span></td></tr>
+      </table>
+      <p class="muted">同 Bundle ID 确实干扰了早期自动化取证，但不是最终业务根因。独立 Bundle ID 证明 <code>oneClickEnable()</code> 已执行，真正拦截点是过窄的旋钮原值白名单及其不透明错误提示。</p>
+    </section>
+
+    <section class="card">
+      <h2>D8 / D2 真机结果</h2>
+      <p><span class="status fail">已稳定复现</span></p>
+      <table>
+        <tr><th>检查</th><th>结果</th></tr>
+        <tr><td>0xEE 会话</td><td><span class="status ok">通过</span></td></tr>
+        <tr><td>D5 读取 handle 0/1</td><td><span class="status ok">通过</span></td></tr>
+        <tr><td>D6 no-op + D5 回读</td><td><span class="status ok">通过</span></td></tr>
+        <tr><td>D6 临时亮度 + 恢复</td><td><span class="status ok">通过</span></td></tr>
+        <tr><td>D8 原色 no-op + D2 回读</td><td><span class="status ok">通过</span></td></tr>
+        <tr><td>D8 新颜色 + D2 回读</td><td><span class="status fail">失败</span></td></tr>
+        <tr><td>B2 1568-byte 键位表</td><td><span class="status ok">App 调试流程读取成功</span></td></tr>
+      </table>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>键位表证据</h2>
+    <pre>L1[p60=0x00AE,p96=0x00AA,p97=0x00A9]
+L2[p60=0x00A8,p96=0x00AA,p97=0x00A9]
+L3–L8 与 L2 相同</pre>
+    <p><code>0x00AE</code> 是 Play/Pause；<code>0x00A8</code> 是 Mute。只有第 1 层旋钮按下被自定义，左右旋和其余七层均符合当前已验证布局，因此不是随机密文。</p>
+  </section>
+
+  <section class="card">
+    <h2>失败链路</h2>
+    <div class="flow" aria-label="D8 写入失败链路">
+      <div class="step"><h3>1 · 写入</h3><div>D8 index 1<br>目标 <code>#123456</code></div></div>
+      <div class="arrow">→</div>
+      <div class="step"><h3>2 · 固件响应</h3><div>ACK payload 与请求一致</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><h3>3 · 严格回读</h3><div>D2 index 1<br>实际 <code>#000000</code></div></div>
+    </div>
+    <p class="muted">这表明 ACK 只证明命令帧被接受，不证明新颜色已持久应用。可能性包括当前灯效模式拒绝任意 D8 颜色、固件仅允许特定调色板、写入生效延迟超过 100 ms，或 D8/D2 在此固件状态下使用不同颜色存储语义。</p>
+  </section>
+
+  <section class="card">
+    <h2>真机证据</h2>
+    <pre>firmware: 10 00 01 AA 06 00 8B 8B
+D5 h0: 0C 32 02 00 01 00 00 05 80 04 3C 02 01 00 FF 00 00
+D5 h1: 06 32 02 00 01 01 00 05 80 04 B0 00 01 F8 FF 00 00
+D6 no-op ACK + D5 exact readback: PASS
+D6 changed value + exact restore: PASS
+D8 no-op ACK + D2 exact readback: PASS
+D8 changed target: index 1 = #123456
+D2 actual readback: index 1 = #000000</pre>
+    <p>持久备份：</p>
+    <ul>
+      <li><code>~/Library/Application Support/Air75AgentBridge/Backups/2026-08-14T18-48-25Z-hardware-lighting.json</code></li>
+      <li><code>~/Library/Application Support/Air75AgentBridge/Backups/2026-08-14T18-48-27Z-hardware-signal-lights.json</code></li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>代码变更与下一步</h2>
+    <ol>
+      <li>已为配置入口增加结构化日志：请求、B2 读取、布局校验、持久备份、写入回读和错误出口。</li>
+      <li>已把 D8 错误扩展为包含目标颜色与实际 D2 回读。</li>
+      <li>已加强 D8 失败恢复：恢复后必须再次 D2 精确回读，否则报告独立的恢复失败。</li>
+      <li>已增加可执行错误：检测到第 1 层 p60=<code>0x00AE</code> 时，提示用 NuPhyIO 恢复旋钮按下为 Mute；仍拒绝写入。</li>
+      <li>已加入软件回归，确认该自定义仍被拦截且返回精确错误；<code>Air75CoreSelfTest --software-only</code> 全部通过。</li>
+      <li>下一步调整 Probe：B2 检查不应因 D8 失败而跳过；每一项独立记录并确保最终恢复检查必定执行。</li>
+      <li>对 D8 做最小矩阵：测试已知五色、不同回读延迟以及进入 signal-indicator 模式前后差异。在获得真机证据前不放宽精确回读规则。</li>
+      <li>用户把旋钮按下恢复为 Mute、退出 NuPhyIO 后，可重新执行配置；随后继续真机验证 B3 完整回读。</li>
+    </ol>
+  </section>
+
+  <section class="card">
+    <h2>安全状态</h2>
+    <ul>
+      <li>没有运行 0xEF IAP、0xF1 恢复出厂或未知固件命令。</li>
+      <li>D6 临时修改已精确恢复。</li>
+      <li>D8 失败路径已尝试恢复原色；新的代码会验证恢复结果。</li>
+      <li>Probe 在 D8 失败前退出；后续 App 调试流程只执行了 B2 读取，未发送 B3 写入。</li>
+      <li>软件回归 <code>Air75CoreSelfTest --software-only</code> 全部通过。</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>
