@@ -3,6 +3,12 @@ import AppKit
 import ApplicationServices
 import Combine
 import Foundation
+import OSLog
+
+private let hardwareProfileLogger = Logger(
+    subsystem: "com.nagentbridge.mac",
+    category: "hardware-profile"
+)
 
 @MainActor
 final class BridgeStore: ObservableObject {
@@ -141,7 +147,6 @@ final class BridgeStore: ObservableObject {
                 }
                 self.publishDeviceDiagnostics()
                 self.verifyRecordedHardwareProfileIfNeeded()
-
                 // The U1 receiver is physically USB, but it is a distinct
                 // 2.4G lighting path. Re-probe whenever the active path
                 // changes so stale wired state cannot keep wireless writes
@@ -375,6 +380,7 @@ final class BridgeStore: ObservableObject {
     }
 
     func oneClickEnable() {
+        hardwareProfileLogger.notice("Configure requested")
         guard !hardwareProfileBusy else { return }
         // D5/D6 and the keymap controller share the same vendor HID channel.
         // If a connection refresh was already in flight, wait for it instead
@@ -403,6 +409,7 @@ final class BridgeStore: ObservableObject {
             return
         }
         guard let device = currentDevice else {
+            hardwareProfileLogger.error("Configure stopped: no current device")
             lastMessage = "请先连接受支持的 NuPhy 键盘"
             return
         }
@@ -429,12 +436,14 @@ final class BridgeStore: ObservableObject {
             return
         }
         guard let usbDevice = matchingUSBDevice else {
+            hardwareProfileLogger.error("Configure stopped: no direct USB configuration interface")
             lastMessage = "请先用 USB-C 数据线连接受支持的 NuPhy 键盘"
             showOverlay("需要 USB-C", detail: "首次写入键盘专用层时请连接数据线")
             return
         }
         let targetProfile = profile(for: usbDevice)
         guard let controller = KeyboardDriverRegistry.keymapDriver(for: targetProfile) else {
+            hardwareProfileLogger.notice("No verified keymap driver; using software mode")
             configuration.mappingMode = .runtime
             configuration.enabled = true
             configuration.codexModeEnabled = true
@@ -467,12 +476,24 @@ final class BridgeStore: ObservableObject {
             do {
                 let keybindingInstaller = codexKeybindingInstaller
                 let result = try await Task.detached(priority: .userInitiated) { () -> (KeyboardKeymapInstallResult, URL, URL, CodexKeybindingInstallResult, [KeyboardLightingState]?, String?) in
+                    hardwareProfileLogger.notice("Reading full keymap before configuration")
                     let original = try controller.readKeymap()
+                    hardwareProfileLogger.notice("Read keymap: \(original.count, privacy: .public) bytes")
                     // Validate before creating a backup. Firmware updaters can
                     // leave a NuPhyIO encryption session active, in which case
                     // a correctly sized read contains ciphertext rather than a
                     // restorable key matrix.
                     guard controller.isPlausibleKeymap(original) else {
+                        do {
+                            _ = try controller.makeBridgeProfile(from: original)
+                        } catch let validationError as Air75KeymapError {
+                            if case .unsupportedKnobCustomization = validationError {
+                                throw validationError
+                            }
+                        } catch {
+                            // Keep unknown/ciphertext reads on the generic safe path below.
+                        }
+                        hardwareProfileLogger.error("Keymap rejected by plausibility validation")
                         throw Air75KeymapError.encryptedSessionData
                     }
                     let keymapBackup: URL
@@ -498,7 +519,9 @@ final class BridgeStore: ObservableObject {
                         configuration: currentConfiguration,
                         note: "写入 \(targetModelName) 专用层前的应用配置与完整 HID 身份。"
                     )
+                    hardwareProfileLogger.notice("Verified persistent backups before write")
                     let installed = try controller.installBridgeProfile(expectedOriginal: original)
+                    hardwareProfileLogger.notice("Bridge keymap write and full readback succeeded")
                     let keybindings = try keybindingInstaller.install()
                     var indicatorStates: [KeyboardLightingState]?
                     var indicatorError: String?
@@ -571,6 +594,7 @@ final class BridgeStore: ObservableObject {
                     showOverlay("N Agent Bridge 已启用", detail: result.3.changed ? "请重启一次 Codex 后使用" : "专用按键 · 蓝牙可用")
                 }
             } catch {
+                hardwareProfileLogger.error("Configure failed: \(String(reflecting: error), privacy: .public)")
                 hardwareProfileMessage = "写入失败：\(error.localizedDescription)"
                 lastMessage = hardwareProfileMessage
                 showOverlay("启用失败", detail: error.localizedDescription)
