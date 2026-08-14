@@ -152,7 +152,8 @@ public enum Air75LightingError: LocalizedError {
     case sessionKeyConflict(UInt8)
     case sleepVerificationFailed(expected: [UInt8], actual: [UInt8])
     case invalidSignalLights
-    case signalLightReadbackMismatch
+    case signalLightReadbackMismatch(expected: [Air75SignalLight], actual: [Air75SignalLight])
+    case signalLightRestoreFailed(expected: [Air75SignalLight], actual: [Air75SignalLight])
     case unsupportedBacklightMode(model: String, mode: Air75BacklightMode)
     case unsupportedSidelightMode(model: String, mode: Air75SidelightMode)
     case stateWritesNotVerified(String)
@@ -178,8 +179,20 @@ public enum Air75LightingError: LocalizedError {
             return "键盘休眠时间回读不一致（期望 \(expectedBytes)，实际 \(actualBytes)）；已尝试恢复修改前设置"
         case .invalidSignalLights:
             return "F1–F6 指示灯数据无效"
-        case .signalLightReadbackMismatch:
-            return "Agent 指示灯写入后的 D2 回读与目标颜色不一致；已尝试恢复修改前颜色"
+        case .signalLightReadbackMismatch(let expected, let actual):
+            func summary(_ lights: [Air75SignalLight]) -> String {
+                lights.sorted(by: { $0.index < $1.index })
+                    .map { "\($0.index)=\($0.color.hex)" }
+                    .joined(separator: ",")
+            }
+            return "Agent 指示灯 D2 回读不一致（目标 \(summary(expected))，实际 \(summary(actual))）；已尝试恢复修改前颜色"
+        case .signalLightRestoreFailed(let expected, let actual):
+            func summary(_ lights: [Air75SignalLight]) -> String {
+                lights.sorted(by: { $0.index < $1.index })
+                    .map { "\($0.index)=\($0.color.hex)" }
+                    .joined(separator: ",")
+            }
+            return "Agent 指示灯恢复失败（原值 \(summary(expected))，实际 \(summary(actual))）"
         case .unsupportedBacklightMode(let model, let mode):
             return "\(model) 不支持背光效果“\(mode.displayName)”"
         case .unsupportedSidelightMode(let model, let mode):
@@ -342,13 +355,29 @@ public final class Air75V3LightingController: @unchecked Sendable {
             Thread.sleep(forTimeInterval: 0.10)
             let verified = try readSignalLights(indices: requested.map(\.index))
             guard verified.sorted(by: { $0.index < $1.index }) == requested else {
-                throw Air75LightingError.signalLightReadbackMismatch
+                throw Air75LightingError.signalLightReadbackMismatch(
+                    expected: requested,
+                    actual: verified
+                )
             }
             return verified
         } catch {
-            try? writeSignalLightsAcknowledged(before)
-            Thread.sleep(forTimeInterval: 0.10)
-            _ = try? readSignalLights(indices: before.map(\.index))
+            do {
+                try writeSignalLightsAcknowledged(before)
+                Thread.sleep(forTimeInterval: 0.10)
+                let restored = try readSignalLights(indices: before.map(\.index))
+                guard restored.sorted(by: { $0.index < $1.index })
+                        == before.sorted(by: { $0.index < $1.index }) else {
+                    throw Air75LightingError.signalLightRestoreFailed(
+                        expected: before,
+                        actual: restored
+                    )
+                }
+            } catch let restoreError as Air75LightingError {
+                if case .signalLightRestoreFailed = restoreError { throw restoreError }
+            } catch {
+                throw error
+            }
             throw error
         }
     }
